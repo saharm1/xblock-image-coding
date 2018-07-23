@@ -29,11 +29,13 @@ Maybe:
 
 import pkg_resources
 from django.template import Context, Template
+from django.template.loader import get_template
 
 from xblock.core import XBlock
 from xblock.fields import Scope, String, List, Float, Boolean
 from xblock.fragment import Fragment
 
+from .mixins import EnforceDueDates
 # from lxml import etree
 # from xml.etree import ElementTree as ET
 # 
@@ -41,7 +43,7 @@ from xblock.fragment import Fragment
 # 
 # import textwrap
 
-class ImageCodingXBlock(XBlock):
+class ImageCodingXBlock(EnforceDueDates, XBlock):
     icon_class = 'other'  # vs. video etc.
 
     display_name = String(display_name='Display Name',
@@ -51,7 +53,7 @@ class ImageCodingXBlock(XBlock):
 
     # TODO Scope.settings vs. Scope.content
     body = String(
-        default='<p>Body goes here</p>', 
+        default='Body goes here',
         scope=Scope.settings,
         help='Body html',
     )
@@ -107,42 +109,51 @@ class ImageCodingXBlock(XBlock):
     )
     has_score = True
 
+    def build_fragment(
+        self,
+        template,
+        context_dict,
+    ):
+        # pylint: disable=dangerous-default-value, too-many-arguments
+        """
+        Creates a fragment for display.
+        """
+        context = Context(context_dict)
+        fragment = Fragment(template.render(context))
+        return fragment
 
-    def student_view(self, context=None):
+    def student_view(self, context={}):
         """Student view of the problem, complete with Run button and grading"""
-        #import pdb
-        #pdb.set_trace()
-        
         correct_icon_url = self.runtime.local_resource_url(self, 'public/images/correct-icon.png')
         incorrect_icon_url = self.runtime.local_resource_url(self, 'public/images/incorrect-icon.png')
         unanswered_icon_url = self.runtime.local_resource_url(self, 'public/images/unanswered-icon.png')
-
 
         # bootstrap logic - trigger on empty student code
         # TODO: could more precisely notice that the student has not written anything
         student_code = self.student_code
         if (student_code.strip() == ''):
             student_code = self.starter_code
-        
-        html = self.resource_string('static/html/image_coding_view.html')
-        #import pdb
-        #pdb.set_trace()
-        import urllib
-        
         hint_button_css = 'display:none'
         if self.hints:
             hint_button_css = 'display:inline'
-        frag = Fragment(html.format(self=self,
-                                    stored_correctness=self.stored_correctness,
-                                    student_code=student_code,  # NOT just on self.xxx
-                                    hint_button_css=hint_button_css,
-                                    solution_encoded=urllib.quote(self.solution_code).replace('%', '\\'),
-                                    regex_encoded=urllib.quote(self.regex).replace('%', '\\'),
-                                    unique_id=self.get_unique_id(),
-                                    correct_icon_url=correct_icon_url,
-                                    incorrect_icon_url=incorrect_icon_url,
-                                    unanswered_icon_url=unanswered_icon_url
-                                    )) 
+        import urllib
+        context.update(
+            {
+                'self': self,
+                'stored_correctness': self.stored_correctness,
+                'student_code': student_code, # NOT just on self.xxx
+                'hint_button_css': hint_button_css,
+                'solution_encoded': urllib.quote(self.solution_code).replace('%', '\\'),
+                'regex_encoded': urllib.quote(self.regex).replace('%', '\\'),
+                'unique_id': self.get_unique_id(),
+                'correct_icon_url': correct_icon_url,
+                'incorrect_icon_url': incorrect_icon_url,
+                'unanswered_icon_url': unanswered_icon_url,
+                'is_past_due': self.is_past_due(),
+            }
+        )
+        template = get_template('image_coding_view.html')
+        frag = self.build_fragment(template, context)
         frag.add_css(self.resource_string('static/css/image_coding.css'))
         frag.add_javascript(self.resource_string('static/js/image_coding_view.js'))
         # Note: the html includes the regular /static/xxx .js files itself, so we don't host
